@@ -3,8 +3,41 @@ import Ride from '../models/Ride.js';
 import twilio from 'twilio';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import fetch from 'node-fetch';
 
 const otpStore = new Map(); // phone -> otp code
+
+// Helper: Send OTP via OTP Service (Mobile Verification)
+const sendOtpViaMobileService = async (phone, otp, type = 'captain') => {
+  const serviceToken = process.env.OTP_SERVICE_TOKEN;
+  if (!serviceToken) return false;
+
+  try {
+    // Using the token for mobile OTP service verification
+    const response = await fetch('https://api.otp-service.com/send', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${serviceToken}`,
+      },
+      body: JSON.stringify({
+        phone: `+91${phone}`,
+        message: type === 'captain' 
+          ? `Your TaxiNova Captain verification code is ${otp}. Valid for 10 minutes.`
+          : `Your TaxiNova password reset code is ${otp}. Do not share this.`,
+        type: 'transactional'
+      })
+    }).catch(() => null);
+
+    if (response && response.ok) {
+      console.log(`\n=== [OTP SERVICE SMS SENT] ===\nSent ${type} OTP to ${phone}\n================================\n`);
+      return true;
+    }
+  } catch (err) {
+    console.error("\n[OTP SERVICE ERROR]:", err.message);
+  }
+  return false;
+};
 
 // POST send OTP for captain registration
 export const sendCaptainOtp = async (req, res) => {
@@ -30,12 +63,20 @@ export const sendCaptainOtp = async (req, res) => {
       });
       console.log(`\n\n=== [TWILIO SMS DISPATCHED] ===\nSent Captain OTP to ${phone}\n===============================\n`);
     } catch (err) {
-      console.error("\n[TWILIO ERROR] Failed to send SMS:", err.message);
-      otpStore.set(phone, '123456');
-      console.log(`\n\n=== [TWILIO FAILED - FALLBACK] ===\nResorting to Demo OTP: 123456\n===============================\n`);
+      console.error("\n[TWILIO ERROR]:", err.message);
+      // Fallback to OTP Service Token
+      const sentViaService = await sendOtpViaMobileService(phone, otp, 'captain');
+      if (!sentViaService) {
+        otpStore.set(phone, '123456');
+        console.log(`\n\n=== [FALLBACK DEMO OTP] ===\nOTP for ${phone} is 123456\n============================\n`);
+      }
     }
   } else {
-    console.log(`\n\n=== [CAPTAIN DEMO SMS SIMULATION] ===\nOTP for ${phone} is ${otp}\n===============================\n`);
+    // Try OTP Service Token first
+    const sentViaService = await sendOtpViaMobileService(phone, otp, 'captain');
+    if (!sentViaService) {
+      console.log(`\n\n=== [CAPTAIN DEMO SMS SIMULATION] ===\nOTP for ${phone} is ${otp}\n=======================================\n`);
+    }
   }
 
   res.json({ message: 'OTP successfully processed' });
@@ -64,10 +105,18 @@ export const forgotPasswordCaptain = async (req, res) => {
         to: `+91${captain.phone}`,
       });
     } catch {
-      otpStore.set(email, '123456');
+      // Fallback to OTP Service Token
+      const sentViaService = await sendOtpViaMobileService(captain.phone, otp, 'forgot');
+      if (!sentViaService) {
+        otpStore.set(email, '123456');
+      }
     }
   } else {
-    console.log(`\n=== [CAPTAIN FORGOT PASSWORD OTP] ===\nOTP for ${email} is ${otp}\n=====================================\n`);
+    // Try OTP Service Token
+    const sentViaService = await sendOtpViaMobileService(captain.phone, otp, 'forgot');
+    if (!sentViaService) {
+      console.log(`\n=== [CAPTAIN FORGOT PASSWORD OTP] ===\nOTP for ${email} is ${otp}\n=====================================\n`);
+    }
   }
   res.json({ message: 'OTP sent to your registered phone number' });
 };

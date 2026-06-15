@@ -1,17 +1,46 @@
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import twilio from 'twilio';
+import fetch from 'node-fetch';
 import User from '../models/User.js';
 import Admin from '../models/Admin.js';
 
 const otpStore = new Map(); // phone -> otp code
-
 // Safely configure Twilio Client
 const getTwilioClient = () => {
   if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
     return twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
   }
   return null;
+};
+
+// Helper: Send OTP via Mobile Service (OTP_SERVICE_TOKEN)
+const sendOtpViaMobileService = async (phone, otp, contextLabel) => {
+  const serviceToken = process.env.OTP_SERVICE_TOKEN;
+  if (!serviceToken) return false;
+
+  try {
+    const response = await fetch('https://api.otp-service.com/send', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${serviceToken}`,
+      },
+      body: JSON.stringify({
+        phone: `+91${phone}`,
+        message: `Your TaxiNova ${contextLabel} code is ${otp}. Do not share this with anyone. Valid for 10 minutes.`,
+        type: 'transactional'
+      })
+    }).catch(() => null);
+
+    if (response && response.ok) {
+      console.log(`\n\n=== [OTP SERVICE DISPATCHED] ===\nSent ${contextLabel} OTP to ${phone}\n==================================\n`);
+      return true;
+    }
+  } catch (err) {
+    console.error("\n[OTP SERVICE ERROR]:", err.message);
+  }
+  return false;
 };
 
 export const dispatchOtp = async (phone, contextLabel = 'verification') => {
@@ -30,13 +59,21 @@ export const dispatchOtp = async (phone, contextLabel = 'verification') => {
       });
       console.log(`\n\n=== [TWILIO SMS DISPATCHED] ===\nSent true ${contextLabel} OTP to ${phone}\n===============================\n`);
     } catch (err) {
-      console.error("\n[TWILIO ERROR] Failed to send SMS:", err.message);
-      // Fallback aggressively to Demo if Twilio fails (e.g. unverified number on trial account)
-      otpStore.set(phone, '123456');
-      console.log(`\n\n=== [TWILIO FAILED - FALLBACK] ===\nResorting to Demo OTP: 123456\n===============================\n`);
+      console.error("\n[TWILIO ERROR]:", err.message);
+      // Try OTP Service Token
+      const sentViaService = await sendOtpViaMobileService(phone, otp, contextLabel);
+      if (!sentViaService) {
+        // Fallback to Demo OTP
+        otpStore.set(phone, '123456');
+        console.log(`\n\n=== [FALLBACK DEMO OTP] ===\nResorting to Demo OTP: 123456\n=============================\n`);
+      }
     }
   } else {
-    console.log(`\n\n=== [DEV DEMO SMS SIMULATION] ===\n${contextLabel} OTP for ${phone} is ${otp}\n===============================\n`);
+    // Try OTP Service Token first
+    const sentViaService = await sendOtpViaMobileService(phone, otp, contextLabel);
+    if (!sentViaService) {
+      console.log(`\n\n=== [DEV DEMO SMS SIMULATION] ===\n${contextLabel} OTP for ${phone} is ${otp}\n===============================\n`);
+    }
   }
 };
 
