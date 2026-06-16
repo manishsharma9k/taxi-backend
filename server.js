@@ -20,8 +20,20 @@ connectDB();
 const app = express();
 const server = http.createServer(app);
 
+const corsOrigin = process.env.FRONTEND_URL || '*';
+const corsOptions = {
+  origin: corsOrigin,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: Boolean(process.env.FRONTEND_URL),
+};
+
 export const io = new Server(server, {
-  cors: { origin: '*', methods: ['GET', 'POST'] }
+  cors: {
+    origin: corsOrigin,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    credentials: Boolean(process.env.FRONTEND_URL),
+  },
 });
 
 // Map to track socketId -> { role, id }
@@ -77,7 +89,7 @@ io.on('connection', (socket) => {
 });
 
 // Middleware
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
