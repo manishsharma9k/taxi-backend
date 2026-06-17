@@ -62,6 +62,13 @@ io.on('connection', (socket) => {
     } catch {}
   });
 
+  socket.on('ride:chat:send', (msgData) => {
+    // msgData contains: rideId, senderId, receiverId, text, timestamp
+    // Broadcast to the receiver (could be a user or a captain, so we emit to both potential room names)
+    io.to(`user_${msgData.receiverId}`).emit('ride:chat:receive', msgData);
+    io.to(`captain_${msgData.receiverId}`).emit('ride:chat:receive', msgData);
+  });
+
   socket.on('captain:location', async ({ captainId, lat, lng }) => {
     await Captain.findByIdAndUpdate(captainId, {
       'location.lat': lat,
