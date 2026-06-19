@@ -77,9 +77,15 @@ export const dispatchOtp = async (phone, contextLabel = 'verification') => {
   }
 };
 
-const generateToken = (id) => {
+const generateAccessToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET || 'fallback_secret', {
     expiresIn: '30d',
+  });
+};
+
+const generateRefreshToken = (id) => {
+  return jwt.sign({ id }, process.env.JWT_REFRESH_SECRET || 'fallback_refresh_secret', {
+    expiresIn: '60d',
   });
 };
 
@@ -125,13 +131,19 @@ export const signup = async (req, res) => {
       customId,
     });
 
+    // create refresh token and persist
+    const refreshToken = generateRefreshToken(newUser._id);
+    newUser.refreshToken = refreshToken;
+    await newUser.save();
+
     otpStore.delete(phone); // clear specific OTP
 
     res.status(201).json({
       id: newUser._id,
       name: newUser.name,
       phone: newUser.phone,
-      token: generateToken(newUser._id),
+      token: generateAccessToken(newUser._id),
+      refreshToken,
     });
   } catch (error) {
     res.status(500).json({ message: 'Server error during signup' });
@@ -185,14 +197,51 @@ export const login = async (req, res) => {
 
     otpStore.delete(phone);
 
+    // generate refresh token and persist
+    const refreshToken = generateRefreshToken(user._id);
+    user.refreshToken = refreshToken;
+    await user.save();
+
     res.json({
       id: user._id,
       name: user.name,
       phone: user.phone,
-      token: generateToken(user._id),
+      token: generateAccessToken(user._id),
+      refreshToken,
     });
   } catch (error) {
     res.status(500).json({ message: 'Server error during login' });
+  }
+};
+
+// Exchange refresh token for a fresh access token
+export const refreshToken = async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    if (!refreshToken) return res.status(400).json({ message: 'Refresh token required' });
+
+    let decoded;
+    try {
+      decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET || 'fallback_refresh_secret');
+    } catch (err) {
+      return res.status(401).json({ message: 'Invalid or expired refresh token' });
+    }
+
+    const user = await User.findById(decoded.id);
+    if (!user) return res.status(401).json({ message: 'User not found' });
+    if (!user.refreshToken || user.refreshToken !== refreshToken) {
+      return res.status(401).json({ message: 'Refresh token mismatch' });
+    }
+
+    const newAccess = generateAccessToken(user._id);
+    // Optionally rotate refresh token
+    const newRefresh = generateRefreshToken(user._id);
+    user.refreshToken = newRefresh;
+    await user.save();
+
+    res.json({ token: newAccess, refreshToken: newRefresh });
+  } catch (err) {
+    res.status(500).json({ message: 'Error refreshing token' });
   }
 };
 

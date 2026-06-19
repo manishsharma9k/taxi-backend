@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import http from 'http';
 import { Server } from 'socket.io';
+import { setIo } from './socket.js';
 import rideRoutes from './routes/rideRoutes.js';
 import authRoutes from './routes/authRoutes.js';
 import captainRoutes from './routes/captainRoutes.js';
@@ -35,6 +36,9 @@ export const io = new Server(server, {
     credentials: Boolean(process.env.FRONTEND_URL),
   },
 });
+
+// Expose io to other modules via socket helper (avoids circular imports)
+setIo(io);
 
 // Map to track socketId -> { role, id }
 const connectedSockets = new Map();
